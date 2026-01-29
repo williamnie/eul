@@ -44,6 +44,8 @@ struct CpuMenuBlockView: View {
                             Spacer()
                             MiniSectionView(title: "15 min", value: cpuStore.loadAverage15MinString)
                         }
+                        Spacer()
+                        MiniSectionView(title: "cpu.up_time_days", value: cpuStore.upTimeDaysString)
                         cpuStore.temp.map { temp in
                             Group {
                                 Spacer()

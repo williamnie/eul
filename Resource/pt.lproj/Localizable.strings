@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Núcleos Físicos";
 "cpu.logical_cores" = "Núcleos Lógicos";
 "cpu.up_time" = "Tempo de Atividade";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Nvl. Térmico";
 "cpu.system" = "Sistema";
 "cpu.user" = "Utilizador";

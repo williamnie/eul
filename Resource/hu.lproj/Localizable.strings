@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Fizikai magok";
 "cpu.logical_cores" = "Logikai magok";
 "cpu.up_time" = "üzemidő";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Hőm. szint";
 "cpu.system" = "Rendszer";
 "cpu.user" = "Felhaszn.";

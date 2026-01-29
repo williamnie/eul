@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Бодит цөм";
 "cpu.logical_cores" = "Логик цөм";
 "cpu.up_time" = "Асаалттай";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Thermal Lv.";
 "cpu.system" = "Систем";
 "cpu.user" = "Хэрэглэгч";

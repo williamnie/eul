@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Physical Cores";
 "cpu.logical_cores" = "Logical Cores";
 "cpu.up_time" = "Up Time";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "အပူအဆင့်";
 "cpu.system" = "စနစ်";
 "cpu.user" = "အသုံးပြုသူ";

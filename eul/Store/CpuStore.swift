@@ -40,6 +40,13 @@ class CpuStore: ObservableObject, Refreshable {
         return String(format: "%.0f%%", usage.system + usage.user)
     }
 
+    var upTimeDaysString: String {
+        guard let upTime = upTime else {
+            return "N/A"
+        }
+        return "\(upTime.days)"
+    }
+
     var usage: Double? {
         guard let usageCPU = usageCPU else {
             return nil

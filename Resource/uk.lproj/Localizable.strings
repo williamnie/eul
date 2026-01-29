@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Фізичних Ядер";
 "cpu.logical_cores" = "Логічних Ядер";
 "cpu.up_time" = "Час Роботи";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Тепловий Рівень";
 "cpu.system" = "Система";
 "cpu.user" = "Користувач";

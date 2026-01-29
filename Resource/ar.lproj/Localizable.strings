@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "النوى المادية";
 "cpu.logical_cores" = "النوى المنطقية";
 "cpu.up_time" = "مدة التشغيل";
+"cpu.up_time_days" = "أيام التشغيل";
 "cpu.thermal_level" = "المستوى الحراري";
 "cpu.system" = "النظام";
 "cpu.user" = "المستعمل";

@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Fyzická jádra";
 "cpu.logical_cores" = "Logická jádra";
 "cpu.up_time" = "V provozu";
+"cpu.up_time_days" = "Dny provozu";
 "cpu.thermal_level" = "Teplotní úroveň";
 "cpu.system" = "Systém";
 "cpu.user" = "Uživatel";

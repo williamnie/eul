@@ -38,6 +38,7 @@
 "cpu.physical_cores" = "fysiske kerner";
 "cpu.logical_cores" = "logiske kerner";
 "cpu.up_time" = "oppetid";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "termisk niveau";
 "cpu.system" = "system";
 "cpu.user" = "bruger";

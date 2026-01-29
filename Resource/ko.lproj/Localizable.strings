@@ -40,6 +40,7 @@ battery.timeRemaining = "Time Rem.";
 "cpu.physical_cores" = "물리 코어";
 "cpu.logical_cores" = "논리 코어";
 "cpu.up_time" = "가동 시간";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "온도 Lv.";
 "cpu.system" = "시스템";
 "cpu.user" = "사용자";

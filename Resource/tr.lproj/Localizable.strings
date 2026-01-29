@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Fiziksel çekirdekler";
 "cpu.logical_cores" = "Mantıksal çekirdekler";
 "cpu.up_time" = "Çalışma süresi";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Termal düzey";
 "cpu.system" = "Sistem";
 "cpu.user" = "Kullanıcı";

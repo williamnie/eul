@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "แกนประมวลผลทางกายภาพ";
 "cpu.logical_cores" = "แกนประมวลผลทางตรรกะ";
 "cpu.up_time" = "เวลาทำงาน";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "ระดับความร้อน";
 "cpu.system" = "ระบบ";
 "cpu.user" = "ผู้ใช้";

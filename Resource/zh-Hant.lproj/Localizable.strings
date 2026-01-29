@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "物理核心";
 "cpu.logical_cores" = "邏輯核心";
 "cpu.up_time" = "執行時間";
+"cpu.up_time_days" = "開機天數";
 "cpu.thermal_level" = "溫度等級";
 "cpu.system" = "系統";
 "cpu.user" = "使用者";

@@ -38,6 +38,7 @@ Copyright © 2020 Gao Sun. All rights reserved.
 "cpu.physical_cores" = "Fysisk kärna";
 "cpu.logical_cores" = "Logisk kärna";
 "cpu.up_time" = "Upp tid";
+"cpu.up_time_days" = "Uptime Days";
 "cpu.thermal_level" = "Termisk nivå";
 "cpu.system" = "System";
 "cpu.user" = "Användare";

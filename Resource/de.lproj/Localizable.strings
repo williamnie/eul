@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "Physische Kerne";
 "cpu.logical_cores" = "Logische Kerne";
 "cpu.up_time" = "Betriebszeit";
+"cpu.up_time_days" = "Betriebstage";
 "cpu.thermal_level" = "Wärmegrad";
 "cpu.system" = "System";
 "cpu.user" = "Benutzer";

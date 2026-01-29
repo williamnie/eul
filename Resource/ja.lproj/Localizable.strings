@@ -37,6 +37,7 @@
 "cpu.physical_cores" = "物理コア";
 "cpu.logical_cores" = "論理コア";
 "cpu.up_time" = "稼働時間";
+"cpu.up_time_days" = "稼働日数";
 "cpu.thermal_level" = "温度レベル";
 "cpu.system" = "システム";
 "cpu.user" = "ユーザー";
