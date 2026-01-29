@@ -621,8 +621,8 @@ public extension SMCKit {
         do {
             let data = try readData(SMCKey(code: sensorCode, info: DataTypes.SP78))
             temperatureInCelius = Double(fromSP78: (data.0, data.1))
-        } catch SMCError.unknown(kIOReturn: 0, SMCResult: 135) {
-            // If SP78 fails, try FLT format (Apple Silicon Macs)
+        } catch {
+            // If SP78 fails (likely due to type mismatch on Apple Silicon), try FLT format
             let data = try readData(SMCKey(code: sensorCode, info: DataTypes.FLT))
             temperatureInCelius = Double(fromFLT: (data.0, data.1, data.2, data.3))
         }
