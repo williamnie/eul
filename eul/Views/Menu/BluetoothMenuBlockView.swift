@@ -6,7 +6,6 @@
 //  Copyright © 2021 Gao Sun. All rights reserved.
 //
 
-import CoreBluetooth
 import SwiftUI
 
 struct BluetoothRowView: View {
@@ -20,21 +19,10 @@ struct BluetoothRowView: View {
                 .frame(width: nameWidth, alignment: .leading)
                 .lineLimit(1)
             Spacer()
-            if let plistDevice = device.plistDevice, device.hasPlistBattery {
-                if let batteryPercent = plistDevice.BatteryPercent {
-                    MenuInfoView(text: "\(Int(batteryPercent * 100))%")
-                }
-                if let batteryPercent = plistDevice.BatteryPercentLeft {
-                    MenuInfoView(label: "L", text: "\(batteryPercent)%")
-                }
-                if let batteryPercent = plistDevice.BatteryPercentRight {
-                    MenuInfoView(label: "R", text: "\(batteryPercent)%")
-                }
-                if let batteryPercent = plistDevice.BatteryPercentCase {
-                    MenuInfoView(label: "C", text: "\(batteryPercent)%")
-                }
-            } else if let batteryLevel = device.batteryLevel {
-                MenuInfoView(text: "\(batteryLevel)%")
+            if device.isCharging {
+                MenuInfoView(label: "⚡", text: device.percentageString)
+            } else {
+                MenuInfoView(text: device.percentageString)
             }
         }
     }
@@ -47,7 +35,7 @@ struct BluetoothMenuBlockView: View {
         VStack(spacing: 8) {
             Text("bluetooth".localized())
                 .menuSection()
-            if bluetoothStore.devices.count == 0 {
+            if bluetoothStore.devices.isEmpty {
                 Text("ui.empty".localized())
                     .placeholder()
                     .padding(.bottom, 4)
@@ -59,7 +47,7 @@ struct BluetoothMenuBlockView: View {
         .padding(.top, 2)
         .menuBlock()
         .onAppear {
-            bluetoothStore.fetch()
+            bluetoothStore.fetch(force: true)
         }
     }
 }

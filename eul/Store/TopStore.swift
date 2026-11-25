@@ -57,11 +57,11 @@ class TopStore: ObservableObject {
                         return nil
                     }
 
-                    let usage = 100 * (ram / self.memorySizeMB)
+                    let usage = self.memorySizeMB > 0 ? 100 * (ram / self.memorySizeMB) : 0
 
                     return RamUsage(
                         pid: pid,
-                        command: Info.getProcessCommand(pid: pid)!,
+                        command: Info.getProcessCommand(pid: pid) ?? (row.count >= 2 ? row[1] : "\(pid)"),
                         value: usage,
                         usageAmount: ram,
                         runningApp: runningApps.first(where: { $0.processIdentifier == pid })

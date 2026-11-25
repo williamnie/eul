@@ -19,6 +19,9 @@ struct FanView: View {
 
     var averageRpm: String {
         let speeds = fanStore.fans.compactMap { $0.currentSpeed }
+        guard !speeds.isEmpty else {
+            return "N/A"
+        }
         return "\(speeds.reduce(0) { $0 + $1 } / speeds.count) rpm"
     }
 

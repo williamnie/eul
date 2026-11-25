@@ -127,6 +127,8 @@
 
 // MARK: Bluetooth
 "bluetooth" = "蓝牙";
+"bluetooth.device.auto" = "自动检测";
+"bluetooth.device.select" = "选择设备";
 
 // MARK: Disk
 "disk.eject" = "推出";
@@ -207,6 +209,7 @@
 "text_component.loadAverage15Min" = "平均负载 (15分钟)";
 "text_component.average" = "平均";
 "text_component.timeRemaining" = "剩余时间";
+"text_component.name" = "名称";
 
 
 // MARK: CPU Display Mode

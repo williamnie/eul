@@ -15,12 +15,11 @@ private let shellPipeQueue = DispatchQueue(label: "com.gao.eul.shellPipe", qos: 
 func shellData(_ args: [String]) -> Data? {
     let task = Process()
     let pipe = Pipe()
-    let error = Pipe()
 
     Print("shell with", args)
 
     task.standardOutput = pipe
-    task.standardError = error
+    task.standardError = FileHandle.nullDevice
     task.executableURL = URL(fileURLWithPath: "/bin/bash")
     task.arguments = ["-c"] + args
 
@@ -28,10 +27,15 @@ func shellData(_ args: [String]) -> Data? {
     environment["LC_ALL"] = "en_US.UTF-8"
     task.environment = environment
 
+    defer {
+        try? pipe.fileHandleForReading.close()
+    }
+
     do {
         try task.run()
     } catch {
         print("⚠️ shell executed with error", error)
+        return nil
     }
 
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -73,6 +77,7 @@ func shellPipe(_ args: String..., onData: ((String) -> Void)? = nil, didTerminat
     Print("shell pipe with", args)
 
     task.standardOutput = pipe
+    task.standardError = FileHandle.nullDevice
     task.executableURL = URL(fileURLWithPath: "/bin/bash")
     task.arguments = ["-c"] + args
 
@@ -82,8 +87,8 @@ func shellPipe(_ args: String..., onData: ((String) -> Void)? = nil, didTerminat
 
     var buffer = Data()
     let outHandle = pipe.fileHandleForReading
-    outHandle.readabilityHandler = { _ in
-        let data = outHandle.availableData
+    outHandle.readabilityHandler = { handle in
+        let data = handle.availableData
 
         Print("data received for", args)
 
@@ -93,14 +98,15 @@ func shellPipe(_ args: String..., onData: ((String) -> Void)? = nil, didTerminat
                 buffer.removeAll()
                 onData?(str)
             }
-            outHandle.waitForDataInBackgroundAndNotify()
         } else {
+            // EOF 时必须清除 readabilityHandler，否则底层会无限高速回调导致单核 CPU 100%
+            handle.readabilityHandler = nil
             buffer.removeAll()
         }
     }
-    outHandle.waitForDataInBackgroundAndNotify()
 
     task.terminationHandler = { _ in
+        outHandle.readabilityHandler = nil
         try? outHandle.close()
         didTerminate?()
     }

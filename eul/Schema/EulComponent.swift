@@ -34,6 +34,10 @@ enum EulComponent: String, CaseIterable, Identifiable, Codable, JSONCodabble, Lo
         self == .Network
     }
 
+    var isBluetoothDeviceSelectionAvailable: Bool {
+        self == .Bluetooth
+    }
+
     func getView() -> AnyView {
         switch self {
         case .Battery:
@@ -50,6 +54,8 @@ enum EulComponent: String, CaseIterable, Identifiable, Codable, JSONCodabble, Lo
             return AnyView(DiskView())
         case .GPU:
             return AnyView(GpuView())
+        case .Bluetooth:
+            return AnyView(BluetoothView())
         }
     }
 
@@ -60,12 +66,14 @@ enum EulComponent: String, CaseIterable, Identifiable, Codable, JSONCodabble, Lo
     case Network
     case Disk
     case GPU
+    case Bluetooth
 
     static var allCases: [EulComponent] {
         [.CPU, .GPU, .Memory]
             .appending(.Fan, condition: SmcControl.shared.isFanValid)
             .appending(.Network)
             .appending(.Battery, condition: SharedStore.battery.isValid)
+            .appending(.Bluetooth)
             .appending(.Disk)
     }
 

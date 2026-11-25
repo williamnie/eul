@@ -127,6 +127,8 @@
 
 // MARK: Bluetooth
 "bluetooth" = "Bluetooth";
+"bluetooth.device.auto" = "Auto-detect";
+"bluetooth.device.select" = "Device";
 
 // MARK: Disk
 "disk.eject" = "Eject";
@@ -207,6 +209,7 @@
 "text_component.loadAverage15Min" = "Load Average (15 min)";
 "text_component.average" = "Average";
 "text_component.timeRemaining" = "Time Remaining";
+"text_component.name" = "Name";
 
 // MARK: CPU Display Mode
 "cpu_display_mode" = "CPU Display Mode";

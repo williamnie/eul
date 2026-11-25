@@ -6,160 +6,164 @@
 //  Copyright © 2021 Gao Sun. All rights reserved.
 //
 
-import CoreBluetooth
+import Combine
+import Darwin
 import Foundation
-import IOBluetooth
+import IOKit.ps
 
-class BluetoothStore: NSObject, ObservableObject {
-    private let pListDecoder = PropertyListDecoder()
-    private var cbCenteralManager: CBCentralManager?
-    private var bluetoothPlist: BluetoothPlist?
-    private var batteryCharacteristicsDict = [UUID: CBCharacteristic]()
-    private var batteryLevelDict = [UUID: CBCharacteristic]()
+class BluetoothStore: ObservableObject, Refreshable {
+    // IOPSCopyPowerSourcesByType 是 IOKit.ps 中用于按类型读取电源（包含外设电源）的原生 C 符号
+    private typealias CopyPowerSourcesByTypeFn = @convention(c) (Int32) -> Unmanaged<CFTypeRef>?
+    private static let accessorySourceType: Int32 = 4
+
+    private static let copyPowerSourcesByType: CopyPowerSourcesByTypeFn? = {
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "IOPSCopyPowerSourcesByType") else {
+            return nil
+        }
+        return unsafeBitCast(sym, to: CopyPowerSourcesByTypeFn.self)
+    }()
+
+    private let refreshQueue = DispatchQueue(label: "com.gao.eul.bluetooth", qos: .utility)
+    private let minRefreshInterval: TimeInterval = 10
+    private var lastFetchTime: Date = .distantPast
+    private var activeCancellable: AnyCancellable?
 
     @Published var devices: [BluetoothDevice] = []
 
-    var connectedDevices: [BluetoothDevice] {
-        devices.filter { $0.ioDevice.isConnected() }
-    }
-
-    private func readPlist() {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: "/Library/Preferences/com.apple.bluetooth.plist")) else {
-            bluetoothPlist = nil
-            return
+    var selectedDevice: BluetoothDevice? {
+        let selection = SharedStore.componentConfig[.Bluetooth].bluetoothDeviceSelection
+        if !selection.isEmpty, let matched = devices.first(where: { $0.id == selection }) {
+            return matched
         }
-
-        bluetoothPlist = try? pListDecoder.decode(BluetoothPlist.self, from: data)
+        // 自动模式：优先显示鼠标类蓝牙设备，其次显示第一个设备
+        return devices.first(where: { $0.category?.lowercased() == "mouse" }) ?? devices.first
     }
 
-    private func getUUID(by address: String) -> UUID? {
-        guard let uuidString = bluetoothPlist?.CoreBluetoothCache?.first(where: { $1.DeviceAddress == address })?.key else {
-            return nil
+    var autoDeviceDescription: String {
+        let base = "bluetooth.device.auto".localized()
+        if let autoDevice = devices.first(where: { $0.category?.lowercased() == "mouse" }) ?? devices.first {
+            return "\(base) (\(autoDevice.displayName))"
         }
-        return UUID(uuidString: uuidString)
+        return base
     }
 
-    private func getPlistDevice(by address: String) -> BluetoothPlist.Device? {
-        guard let device = bluetoothPlist?.DeviceCache?.first(where: { $0.key == address })?.value else {
-            return nil
-        }
-        return device
+    private var isStatusBarActive: Bool {
+        SharedStore.components.showComponents && SharedStore.components.activeComponents.contains(.Bluetooth)
     }
 
-    func fetch() {
-        readPlist()
-
-        let connectedDevices: [BluetoothDevice] = IOBluetoothDevice.pairedDevices()?.compactMap {
-            guard let ioDevice = $0 as? IOBluetoothDevice, ioDevice.isConnected() else {
-                return nil
-            }
-            return BluetoothDevice(
-                ioDevice: ioDevice,
-                plistDevice: getPlistDevice(by: ioDevice.addressString),
-                uuid: getUUID(by: ioDevice.addressString)
-            )
-        } ?? []
-
-        Print(
-            "🔵🦷 connected devices",
-            connectedDevices.map { "name=\($0.ioDevice.name ?? "N/A"), address=\($0.ioDevice.addressString ?? "N/A")" }
-        )
-
-        let peripherals = cbCenteralManager?.retrievePeripherals(withIdentifiers: connectedDevices.compactMap { $0.uuid }) ?? []
-
-        devices = connectedDevices
-            .map { device in
-                device.copying(
-                    peripheral: peripherals.first(where: { $0.identifier == device.uuid })
-                )
-            }
-
-        devices.forEach {
-            Print("🔵🦷 fetching peripheral for device", $0.displayName, $0.address)
-
-            guard let peripheral = $0.peripheral else {
-                Print("⚠️ peripheral not found")
-                return
-            }
-
-            if peripheral.state == .disconnected {
-                Print("⚠️ peripheral not connected, trying to connect")
-                cbCenteralManager?.connect(peripheral, options: nil)
-            } else if peripheral.state == .connected {
-                Print("🔵🦷 peripheral connected, reading battery characteristics")
-                guard let batteryCharacteristics = batteryCharacteristicsDict[peripheral.identifier] else {
-                    Print("⚠️ battery characteristics for \($0.displayName) not found")
-                    return
+    init() {
+        initObserver(for: .SMCShouldRefresh)
+        DispatchQueue.main.async { [weak self] in
+            self?.activeCancellable = SharedStore.components.$activeComponents.sink { [weak self] active in
+                if active.contains(.Bluetooth) {
+                    self?.fetch(force: true)
                 }
-                peripheral.readValue(for: batteryCharacteristics)
+            }
+        }
+        fetch(force: true)
+    }
+
+    @objc func refresh() {
+        // 仅在状态栏启用了蓝牙组件时参与定时轮询，避免无谓消耗
+        guard isStatusBarActive else {
+            return
+        }
+        fetch(force: false)
+    }
+
+    func fetch(force: Bool = false) {
+        let now = Date()
+        if !force, now.timeIntervalSince(lastFetchTime) < minRefreshInterval {
+            return
+        }
+        lastFetchTime = now
+
+        refreshQueue.async { [weak self] in
+            let fetched = Self.readAccessoryPowerSources()
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if self.devices != fetched {
+                    self.devices = fetched
+                }
             }
         }
     }
 
-    override init() {
-        super.init()
-        cbCenteralManager = CBCentralManager(delegate: self, queue: nil)
-    }
-}
-
-extension BluetoothStore: CBCentralManagerDelegate {
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        Print("🔵🦷 state update", central.state.rawValue)
-    }
-
-    func centralManager(_: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Print("🔵🦷 did connect peripheral", peripheral.description)
-        peripheral.delegate = self
-        peripheral.discoverServices([BluetoothDevice.batteryServiceUUID])
-    }
-}
-
-extension BluetoothStore: CBPeripheralDelegate {
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        Print("🔵🦷 did discover services", peripheral.description)
-
-        if let error = error {
-            print("⚠️ error", error)
-            return
+    /// 通过 IOKit 外设电源接口读取蓝牙外设电量（无子进程、无需蓝牙 TCC 隐私权限）
+    private static func readAccessoryPowerSources() -> [BluetoothDevice] {
+        guard let fn = copyPowerSourcesByType else {
+            return []
         }
 
-        guard let batteryService = peripheral.services?.first(where: { $0.uuid == BluetoothDevice.batteryServiceUUID }) else {
-            Print("❔ battery service not found, skipping")
-            return
+        // 优先查询外设类型 (4)，若返回空则回退查询全部电源 (0)
+        let blob: CFTypeRef? = fn(accessorySourceType)?.takeRetainedValue() ?? fn(0)?.takeRetainedValue()
+        guard let powerBlob = blob,
+              let list = IOPSCopyPowerSourcesList(powerBlob)?.takeRetainedValue() as? [CFTypeRef]
+        else {
+            return []
         }
 
-        peripheral.discoverCharacteristics([BluetoothDevice.batteryCharacteristicsUUID], for: batteryService)
-    }
+        var result: [BluetoothDevice] = []
+        var seenIDs = Set<String>()
 
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        Print("🔵🦷 did discover characteristics", peripheral.description, service.description)
+        for item in list {
+            guard let desc = IOPSGetPowerSourceDescription(powerBlob, item)?.takeUnretainedValue() as? [String: Any] else {
+                continue
+            }
 
-        if let error = error {
-            print("⚠️ error", error)
-            return
+            let sourceType = desc[kIOPSTypeKey as String] as? String
+            let transport = desc[kIOPSTransportTypeKey as String] as? String
+
+            // 仅保留蓝牙相关外设或 Accessory Source
+            let isBluetoothTransport = transport?.localizedCaseInsensitiveContains("bluetooth") == true
+            let isAccessorySource = sourceType == "Accessory Source"
+            guard isBluetoothTransport || isAccessorySource else {
+                continue
+            }
+
+            guard let name = desc[kIOPSNameKey as String] as? String, !name.isEmpty,
+                  let currentCapacity = desc[kIOPSCurrentCapacityKey as String] as? Int
+            else {
+                continue
+            }
+
+            let maxCapacity = (desc[kIOPSMaxCapacityKey as String] as? Int) ?? 100
+            let percentage: Int
+            if maxCapacity > 0 {
+                percentage = min(max(Int(round(Double(currentCapacity) * 100.0 / Double(maxCapacity))), 0), 100)
+            } else {
+                percentage = min(max(currentCapacity, 0), 100)
+            }
+
+            let accessoryID = desc["Accessory Identifier"] as? String
+            let partID = desc["Part Identifier"] as? String
+            let powerSourceID = (desc[kIOPSPowerSourceIDKey as String] as? Int).map(String.init) ?? name
+            let baseID = accessoryID ?? powerSourceID
+            let uniqueID = partID.map { "\(baseID)-\($0)" } ?? baseID
+
+            guard !seenIDs.contains(uniqueID) else {
+                continue
+            }
+            seenIDs.insert(uniqueID)
+
+            let isChargingFlag = (desc[kIOPSIsChargingKey as String] as? Bool) ?? false
+            let powerState = desc[kIOPSPowerSourceStateKey as String] as? String
+            let isCharging = isChargingFlag || powerState == kIOPSACPowerValue
+
+            result.append(
+                BluetoothDevice(
+                    id: uniqueID,
+                    name: name,
+                    category: desc["Accessory Category"] as? String,
+                    transportType: transport,
+                    partIdentifier: partID,
+                    batteryLevel: percentage,
+                    isCharging: isCharging,
+                    lowWarnLevel: desc["Low Warn Level"] as? Int
+                )
+            )
         }
 
-        guard let batteryCharacteristics = service.characteristics?.first(where: { $0.uuid == BluetoothDevice.batteryCharacteristicsUUID }) else {
-            Print("❔ battery characteristics not found, skipping")
-            return
-        }
-
-        batteryCharacteristicsDict[peripheral.identifier] = batteryCharacteristics
-        peripheral.readValue(for: batteryCharacteristics)
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        Print("🔵🦷 did update value for characteristics", peripheral.description, characteristic.description)
-
-        if let error = error {
-            print("⚠️ error", error)
-            return
-        }
-
-        guard let batteryLevel = characteristic.value?[0] else {
-            return
-        }
-
-        devices = devices.map { $0.uuid == peripheral.identifier ? $0.copying(batteryLevel: batteryLevel) : $0 }
+        return result
     }
 }

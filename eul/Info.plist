@@ -35,9 +35,9 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticTermination</key>
-	<true/>
+	<false/>
 	<key>NSSupportsSuddenTermination</key>
-	<true/>
+	<false/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>CpuConfigurationIntent</string>

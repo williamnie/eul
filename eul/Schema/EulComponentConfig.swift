@@ -15,6 +15,7 @@ struct EulComponentConfig: Codable {
     var showGraph: Bool = false
     var diskSelection: String = ""
     var networkPortSelection: String = ""
+    var bluetoothDeviceSelection: String = ""
 
     var json: JSON {
         JSON([
@@ -23,6 +24,7 @@ struct EulComponentConfig: Codable {
             "showGraph": showGraph,
             "diskSelection": diskSelection,
             "networkPortSelection": networkPortSelection,
+            "bluetoothDeviceSelection": bluetoothDeviceSelection,
         ])
     }
 }
@@ -49,6 +51,10 @@ extension EulComponentConfig {
 
         if let string = json["networkPortSelection"].string {
             networkPortSelection = string
+        }
+
+        if let string = json["bluetoothDeviceSelection"].string {
+            bluetoothDeviceSelection = string
         }
     }
 }

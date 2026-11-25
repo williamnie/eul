@@ -6,6 +6,7 @@
 //  Copyright © 2020 Gao Sun. All rights reserved.
 //
 
+import Combine
 import Foundation
 import SharedLibrary
 import WidgetKit
@@ -13,6 +14,7 @@ import WidgetKit
 class NetworkStore: ObservableObject, Refreshable {
     private var networkUsageHasBeenSet = true
     private var lastTimestamp: TimeInterval
+    private var activeCancellable: AnyCancellable?
 
     @Published var networkUsage = Info.NetworkUsage(inBytes: 0, outBytes: 0)
     @Published var ports = [Info.NetworkPort]()
@@ -42,6 +44,13 @@ class NetworkStore: ObservableObject, Refreshable {
     }
 
     @objc func refresh() {
+        guard
+            SharedStore.components.activeComponents.contains(.Network)
+            || SharedStore.menuComponents.activeComponents.contains(.Network)
+        else {
+            return
+        }
+
         guard networkUsageHasBeenSet else {
             return
         }
@@ -50,15 +59,16 @@ class NetworkStore: ObservableObject, Refreshable {
 
         Info.getNetworkUsage(forDevice: config.networkPortSelection.nilIfEmpty) { [self] current, ports, currentActivePort in
             let time = Date().timeIntervalSince1970
+            let elapsed = time - lastTimestamp
 
-            if networkUsage.inBytes > 0, current.inBytes >= networkUsage.inBytes {
-                inSpeedInByte = Double(current.inBytes - networkUsage.inBytes) / (time - lastTimestamp)
+            if elapsed > 0, networkUsage.inBytes > 0, current.inBytes >= networkUsage.inBytes {
+                inSpeedInByte = Double(current.inBytes - networkUsage.inBytes) / elapsed
             } else {
                 inSpeedInByte = 0
             }
 
-            if networkUsage.outBytes > 0, current.outBytes >= networkUsage.outBytes {
-                outSpeedInByte = Double(current.outBytes - networkUsage.outBytes) / (time - lastTimestamp)
+            if elapsed > 0, networkUsage.outBytes > 0, current.outBytes >= networkUsage.outBytes {
+                outSpeedInByte = Double(current.outBytes - networkUsage.outBytes) / elapsed
             } else {
                 outSpeedInByte = 0
             }
@@ -82,5 +92,12 @@ class NetworkStore: ObservableObject, Refreshable {
     init() {
         lastTimestamp = Date().timeIntervalSince1970
         initObserver(for: .NetworkShouldRefresh)
+        activeCancellable = Publishers
+            .CombineLatest(SharedStore.components.$activeComponents, SharedStore.menuComponents.$activeComponents)
+            .sink { _ in
+                DispatchQueue.main.async {
+                    self.refresh()
+                }
+            }
     }
 }

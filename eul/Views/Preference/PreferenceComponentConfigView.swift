@@ -35,6 +35,7 @@ extension Preference {
 
     struct ComponentConfigView: View {
         @EnvironmentObject var batteryStore: BatteryStore
+        @EnvironmentObject var bluetoothStore: BluetoothStore
         @EnvironmentObject var componentConfigStore: ComponentConfigStore
         @EnvironmentObject var diskStore: DiskStore
         @EnvironmentObject var networkStore: NetworkStore
@@ -93,6 +94,24 @@ extension Preference {
                             }
                             .fixedSize()
                         }
+                        if
+                            config.wrappedValue.component.isBluetoothDeviceSelectionAvailable
+                        {
+                            Picker(
+                                "bluetooth.device.select".localized(),
+                                selection: config.bluetoothDeviceSelection
+                            ) {
+                                Text(bluetoothStore.autoDeviceDescription)
+                                    .inlineSection()
+                                    .tag("")
+                                ForEach(bluetoothStore.devices) {
+                                    Text($0.displayName)
+                                        .inlineSection()
+                                        .tag($0.id)
+                                }
+                            }
+                            .fixedSize()
+                        }
                     }
                     if component == .CPU {
                         ComponentTextConfigView<CpuTextComponent>()
@@ -111,6 +130,9 @@ extension Preference {
                     }
                     if batteryStore.isValid, component == .Battery {
                         ComponentTextConfigView<BatteryTextComponent>()
+                    }
+                    if component == .Bluetooth {
+                        ComponentTextConfigView<BluetoothTextComponent>()
                     }
                     if component == .Disk {
                         ComponentTextConfigView<DiskTextComponent>()

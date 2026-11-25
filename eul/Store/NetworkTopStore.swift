@@ -32,6 +32,8 @@ class NetworkTopStore: ObservableObject {
         let runningApp: NSRunningApplication?
     }
 
+    private let queue = DispatchQueue(label: "com.gao.eul.networkTop", qos: .utility)
+    private var isRunning = false
     private var timer: Timer?
     private var activeCancellable: AnyCancellable?
     private var lastTimestamp: TimeInterval = Date().timeIntervalSince1970
@@ -52,80 +54,103 @@ class NetworkTopStore: ObservableObject {
     }
 
     private func run() {
-        guard let string = shell("nettop -L 1 -P -x -J bytes_in,bytes_out") else {
-            print("unable to fetch network activity, please make sure nettop is available")
-            return
-        }
+        queue.async { [weak self] in
+            guard let self = self, !self.isRunning else {
+                return
+            }
+            self.isRunning = true
+            defer { self.isRunning = false }
 
-        let rows = string.split(separator: "\n").map { String($0) }
-        let headers = rows[0]
-            .split(separator: ",", omittingEmptySubsequences: false)
-            .map { String($0.lowercased()) }
-        let processIndex = 0
+            guard let string = shell("nettop -L 1 -P -x -J bytes_in,bytes_out") else {
+                print("unable to fetch network activity, please make sure nettop is available")
+                return
+            }
 
-        guard
-            let inBytesIndex = headers.firstIndex(of: "bytes_in"),
-            let outBytesIndex = headers.firstIndex(of: "bytes_out")
-        else {
-            return
-        }
+            let rows = string.split(separator: "\n").map { String($0) }
+            guard let firstRow = rows.first else {
+                return
+            }
 
-        let runningApps = NSWorkspace.shared.runningApplications
-        let time = Date().timeIntervalSince1970
-        let timeElapsed = time - lastTimestamp
-        lastTimestamp = time
-
-        Print("network top is updating")
-        processes = rows.dropFirst().compactMap { row in
-            let cols = row.split(separator: ",").map { String($0) }
+            let headers = firstRow
+                .split(separator: ",", omittingEmptySubsequences: false)
+                .map { String($0.lowercased()) }
+            let processIndex = 0
 
             guard
-                cols.indices.contains(processIndex),
-                cols.indices.contains(inBytesIndex),
-                cols.indices.contains(outBytesIndex)
+                let inBytesIndex = headers.firstIndex(of: "bytes_in"),
+                let outBytesIndex = headers.firstIndex(of: "bytes_out")
             else {
-                return nil
+                return
             }
 
-            let processCol = cols[processIndex]
-            let splitted = processCol.split(separator: ".").map { String($0) }
+            let runningApps = NSWorkspace.shared.runningApplications
+            let time = Date().timeIntervalSince1970
+            let timeElapsed = time - self.lastTimestamp
+            self.lastTimestamp = time
 
-            guard
-                let last = splitted.last,
-                let pid = Int(last),
-                let inBytes = Double(cols[inBytesIndex]),
-                let outBytes = Double(cols[outBytesIndex])
-            else {
-                return nil
+            guard timeElapsed > 0 else {
+                return
             }
 
-            let lastIn = lastInBytes[pid]
-            let lastOut = lastOutBytes[pid]
+            Print("network top is updating")
+            let result: [ProcessNetworkUsage] = rows.dropFirst().compactMap { row in
+                let cols = row.split(separator: ",").map { String($0) }
 
-            lastInBytes[pid] = inBytes
-            lastOutBytes[pid] = outBytes
+                guard
+                    cols.indices.contains(processIndex),
+                    cols.indices.contains(inBytesIndex),
+                    cols.indices.contains(outBytesIndex)
+                else {
+                    return nil
+                }
 
-            if lastIn == nil, lastOut == nil {
-                return nil
+                let processCol = cols[processIndex]
+                let splitted = processCol.split(separator: ".").map { String($0) }
+
+                guard
+                    let last = splitted.last,
+                    let pid = Int(last),
+                    let inBytes = Double(cols[inBytesIndex]),
+                    let outBytes = Double(cols[outBytesIndex])
+                else {
+                    return nil
+                }
+
+                let lastIn = self.lastInBytes[pid]
+                let lastOut = self.lastOutBytes[pid]
+
+                self.lastInBytes[pid] = inBytes
+                self.lastOutBytes[pid] = outBytes
+
+                if lastIn == nil, lastOut == nil {
+                    return nil
+                }
+
+                let speed = NetworkSpeed(
+                    inSpeedInByte: lastIn.map { $0 > inBytes ? 0 : (inBytes - $0) / timeElapsed } ?? 0,
+                    outSpeedInByte: lastOut.map { $0 > outBytes ? 0 : (outBytes - $0) / timeElapsed } ?? 0
+                )
+
+                guard speed.totalSpeedInByte >= 100 else {
+                    return nil
+                }
+
+                return ProcessNetworkUsage(
+                    pid: pid,
+                    command: Info.getProcessCommand(pid: pid) ?? splitted[0],
+                    value: speed,
+                    runningApp: runningApps.first(where: { $0.processIdentifier == pid })
+                )
             }
+            .sorted(by: { $0.value.totalSpeedInByte > $1.value.totalSpeedInByte })
 
-            let speed = NetworkSpeed(
-                inSpeedInByte: lastIn.map { $0 > inBytes ? 0 : (inBytes - $0) / timeElapsed } ?? 0,
-                outSpeedInByte: lastOut.map { $0 > outBytes ? 0 : (outBytes - $0) / timeElapsed } ?? 0
-            )
-
-            guard speed.totalSpeedInByte >= 100 else {
-                return nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.timer != nil else {
+                    return
+                }
+                self.processes = result
             }
-
-            return ProcessNetworkUsage(
-                pid: pid,
-                command: Info.getProcessCommand(pid: pid) ?? splitted[0],
-                value: speed,
-                runningApp: runningApps.first(where: { $0.processIdentifier == pid })
-            )
         }
-        .sorted(by: { $0.value.totalSpeedInByte > $1.value.totalSpeedInByte })
     }
 
     func update(shouldStart: Bool) {
@@ -140,13 +165,15 @@ class NetworkTopStore: ObservableObject {
             return
         }
 
-        lastInBytes.removeAll()
-        lastOutBytes.removeAll()
-        lastTimestamp = Date().timeIntervalSince1970
+        queue.async { [weak self] in
+            self?.lastInBytes.removeAll()
+            self?.lastOutBytes.removeAll()
+            self?.lastTimestamp = Date().timeIntervalSince1970
+        }
         processes = []
 
-        let timer = Timer.scheduledTimer(withTimeInterval: Double(interval), repeats: true) { _ in
-            self.run()
+        let timer = Timer.scheduledTimer(withTimeInterval: Double(interval), repeats: true) { [weak self] _ in
+            self?.run()
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer

@@ -6,9 +6,11 @@
 //  Copyright © 2020 Gao Sun. All rights reserved.
 //
 
+import Darwin
 import Foundation
 import IOKit.ps
 import SharedLibrary
+import SystemConfiguration
 import SystemKit
 
 extension BatteryEntry.BatteryCondition {
@@ -120,94 +122,164 @@ enum Info {
         }
     }
 
-    struct InterfaceStatus {
+    private static let networkQueue = DispatchQueue(label: "com.gao.eul.network", qos: .utility)
+
+    struct InterfaceStats {
         var name: String
-        var status: String?
+        var inBytes: UInt64
+        var outBytes: UInt64
+        var isActive: Bool
     }
 
-    static func findPort(_ string: String) -> NetworkPort? {
-        guard string.hasPrefix("("), string.hasSuffix(")") else {
-            return nil
-        }
+    /// 使用 SystemConfiguration 原生 API 按系统服务顺序获取网络端口列表，替代 `networksetup -listnetworkserviceorder`
+    static func getNetworkPorts() -> [NetworkPort] {
+        var ports = [NetworkPort]()
+        var seenDevices = Set<String>()
 
-        let trimmed = String(string.dropFirst().dropLast())
-
-        guard let matched = trimmed.firstMatch("Device: ([^,]+)")?.range(at: 1), let deviceRange = Range(matched, in: trimmed) else {
-            return nil
-        }
-
-        var port: String?
-        let device = String(trimmed[deviceRange])
-        if let matched = trimmed.firstMatch("Port: ([^,]+)")?.range(at: 1), let portRange = Range(matched, in: trimmed) {
-            port = String(trimmed[portRange])
-        }
-
-        return NetworkPort(port: port, device: device)
-    }
-
-    static func getActiveInterfaces() -> [String] {
-        shell("ifconfig")?.split(separator: "\n").map { String($0) }.reduce([InterfaceStatus]()) {
-            // new interface
-            if !$1.hasPrefix("\t") {
-                guard let colonIndex = $1.firstIndex(of: ":") else {
-                    return $0
+        if
+            let prefs = SCPreferencesCreate(nil, "eul" as CFString, nil),
+            let networkSet = SCNetworkSetCopyCurrent(prefs),
+            let serviceOrder = SCNetworkSetGetServiceOrder(networkSet) as? [String]
+        {
+            for serviceID in serviceOrder {
+                guard
+                    let service = SCNetworkServiceCopy(prefs, serviceID as CFString),
+                    SCNetworkServiceGetEnabled(service),
+                    let interface = SCNetworkServiceGetInterface(service),
+                    let device = SCNetworkInterfaceGetBSDName(interface) as String?,
+                    !seenDevices.contains(device)
+                else {
+                    continue
                 }
-                return $0.appending(InterfaceStatus(name: String($1[..<colonIndex])))
+                seenDevices.insert(device)
+                let portName = (SCNetworkServiceGetName(service) as String?)
+                    ?? (SCNetworkInterfaceGetLocalizedDisplayName(interface) as String?)
+                ports.append(NetworkPort(port: portName, device: device))
             }
+        }
 
-            let splitted = $1.split(separator: ":").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \t")) }
-
-            guard splitted.count == 2, splitted[0] == "status", let lastInterface = $0.last else {
-                return $0
+        // 若偏好配置中未取到，兜底使用 SCNetworkInterfaceCopyAll
+        if ports.isEmpty, let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] {
+            for interface in interfaces {
+                guard
+                    let device = SCNetworkInterfaceGetBSDName(interface) as String?,
+                    !seenDevices.contains(device)
+                else {
+                    continue
+                }
+                seenDevices.insert(device)
+                let portName = SCNetworkInterfaceGetLocalizedDisplayName(interface) as String?
+                ports.append(NetworkPort(port: portName, device: device))
             }
+        }
 
-            return $0.dropLast().appending(InterfaceStatus(name: lastInterface.name, status: splitted[1]))
-        }.compactMap {
-            $0.status == "active" ? $0.name : nil
-        } ?? []
+        return ports
+    }
+
+    /// 获取当前默认主路由网卡名（如 en0）
+    private static func getPrimaryInterfaceName() -> String? {
+        guard
+            let store = SCDynamicStoreCreate(nil, "eul" as CFString, nil, nil),
+            let dict = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+            let primary = dict["PrimaryInterface"] as? String
+        else {
+            return nil
+        }
+        return primary
+    }
+
+    /// 使用 sysctl(NET_RT_IFLIST2) 一次性读取所有网卡 64 位流量计数与运行状态，替代 `ifconfig` 和 `netstat -bI`
+    private static func getAllInterfaceStats() -> [String: InterfaceStats] {
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var len = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &len, nil, 0) == 0, len > 0 else {
+            return [:]
+        }
+
+        var buffer = [UInt8](repeating: 0, count: len)
+        guard sysctl(&mib, UInt32(mib.count), &buffer, &len, nil, 0) == 0 else {
+            return [:]
+        }
+
+        var result = [String: InterfaceStats]()
+        buffer.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return
+            }
+            var offset = 0
+            while offset + MemoryLayout<if_msghdr>.size <= len {
+                let ptr = baseAddress.advanced(by: offset)
+                let ifm = ptr.assumingMemoryBound(to: if_msghdr.self).pointee
+                let msgLen = Int(ifm.ifm_msglen)
+                guard msgLen > 0, offset + msgLen <= len else {
+                    break
+                }
+
+                if ifm.ifm_type == UInt8(RTM_IFINFO2), msgLen >= MemoryLayout<if_msghdr2>.stride + MemoryLayout<sockaddr_dl>.size {
+                    let if2m = ptr.assumingMemoryBound(to: if_msghdr2.self).pointee
+                    let sdlPtr = ptr.advanced(by: MemoryLayout<if_msghdr2>.stride).assumingMemoryBound(to: sockaddr_dl.self)
+                    let nameLen = Int(sdlPtr.pointee.sdl_nlen)
+                    if nameLen > 0, let nameOffset = MemoryLayout<sockaddr_dl>.offset(of: \.sdl_data) {
+                        let namePtr = UnsafeRawPointer(sdlPtr).advanced(by: nameOffset).assumingMemoryBound(to: UInt8.self)
+                        if let name = String(bytes: UnsafeBufferPointer(start: namePtr, count: nameLen), encoding: .utf8) {
+                            let flags = if2m.ifm_flags
+                            let isActive = (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING)
+                                && (flags & IFF_LOOPBACK) == 0
+                            result[name] = InterfaceStats(
+                                name: name,
+                                inBytes: if2m.ifm_data.ifi_ibytes,
+                                outBytes: if2m.ifm_data.ifi_obytes,
+                                isActive: isActive
+                            )
+                        }
+                    }
+                }
+
+                offset += msgLen
+            }
+        }
+        return result
     }
 
     static func getNetworkUsage(forDevice: String?, _ onData: @escaping (NetworkUsage, [NetworkPort], NetworkPort?) -> Void) {
-        // TO-DO: use Combine
-        shellAsync("networksetup -listnetworkserviceorder") {
-            let services = $0?.split(separator: "\n").map(String.init).compactMap(Info.findPort) ?? []
-            let activeInterfaces = Info.getActiveInterfaces()
-            let currentActivePort = services.first(where: { activeInterfaces.contains($0.device) })
+        networkQueue.async {
+            let services = getNetworkPorts()
+            let statsMap = getAllInterfaceStats()
+            let primaryName = getPrimaryInterfaceName()
+
+            let currentActivePort: NetworkPort? = {
+                if let primaryName = primaryName, let matched = services.first(where: { $0.device == primaryName }) {
+                    return matched
+                }
+                return services.first(where: { statsMap[$0.device]?.isActive == true })
+            }()
+
+            let device = forDevice ?? currentActivePort?.device ?? primaryName ?? "en0"
+            let stats = statsMap[device]
 
             Print("network services order", services)
-            Print("network active interfaces", activeInterfaces)
-            Print("network current active interfaces", currentActivePort ?? "N/A")
+            Print("network current active interface", currentActivePort ?? "N/A")
 
-            var inBytes: UInt64?
-            var outBytes: UInt64?
-
-            let device = forDevice ?? currentActivePort?.device ?? "en0"
-
-            if
-                let rows = shell("netstat -bI \(device)")?.split(separator: "\n").map({ String($0) }),
-                rows.count > 1
-            {
-                let headers = rows[0].splittedByWhitespace
-                let values = rows[1].splittedByWhitespace
-
-                if let raw = String.getValue(of: "ibytes", in: values, of: headers), let bytes = UInt64(raw) {
-                    inBytes = bytes
-                }
-
-                if let raw = String.getValue(of: "obytes", in: values, of: headers), let bytes = UInt64(raw) {
-                    outBytes = bytes
-                }
-            }
+            let usage = NetworkUsage(
+                inBytes: stats?.inBytes ?? 0,
+                outBytes: stats?.outBytes ?? 0
+            )
 
             DispatchQueue.main.async {
-                onData(NetworkUsage(inBytes: inBytes ?? 0, outBytes: outBytes ?? 0), services, currentActivePort)
+                onData(usage, services, currentActivePort)
             }
         }
     }
 
     static var system = System()
 
+    /// 使用原生 Darwin proc_pidpath 获取进程路径，替代 `ps -p <pid> -o comm=` 避免频繁 fork 子进程
     static func getProcessCommand(pid: Int) -> String? {
-        shell("ps -p \(pid) -o comm=")?.trimmingCharacters(in: .newlines)
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        let ret = proc_pidpath(pid_t(pid), &buffer, UInt32(buffer.count))
+        guard ret > 0 else {
+            return nil
+        }
+        return String(cString: buffer)
     }
 }
